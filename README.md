@@ -91,7 +91,3 @@ Contributions and suggestions are welcome! Please fork the repository and create
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-This README provides an overview of the project, its features, and setup instructions, ensuring users understand how to configure, deploy, and update the firmware.
