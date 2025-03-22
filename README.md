@@ -1,6 +1,13 @@
 # Firmware_Water_Meter
 
-**Firmware_Water_Meter** is a firmware project designed for ESP32-based water metering. It measures water flow using a flow sensor and sends the data via MQTT. The firmware supports multiple connectivity options (WiFi, BLE, and Access Point mode) and features Over-The-Air (OTA) update capabilities for easy remote firmware upgrades.
+**Firmware_Water_Meter** is a firmware project designed for ESP32-based water metering. It measures water flow using a flow sensor and sends the data via MQTT. The firmware supports multiple connectivity options (WiFi, BLE, and Access Point mode) and features Over-The-Air (OTA) update capabilities for easy remote 
+firmware upgrades.
+
+## Overview of Hardware System
+
+<p align="center">
+  <img src="images/schematic.png" alt="Overview">
+</p>
 
 ## Features
 
