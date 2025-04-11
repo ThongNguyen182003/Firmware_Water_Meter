@@ -27,10 +27,10 @@ String password_new     = "123457890";
 State currentState = KET_NOI_WIFI;
 
 // MQTT
-const char* mqtt_server   = "c9348ccdaf08484f84328bd7ffcd9471.s1.eu.hivemq.cloud";
-int         mqtt_port     = 8883;
-const char* mqtt_username = "esp32s3";
-const char* mqtt_password = "App123456@";
+const char* mqtt_server   = "app.coreiot.io";
+int         mqtt_port     = 1883;
+const char* mqtt_username = "";
+// const char* mqtt_password = "App123456@";
 
 // Tạo wifiClient + MQTT client + WebServer
 WiFiClientSecure wifiClient;
@@ -49,7 +49,7 @@ static const float calibrationFactor = 450.0;
 
 bool noWaterDetected      = false;
 unsigned long noWaterStartTime = 0;
-const unsigned long noWaterDuration = 2 * 60 * 1000; // 2 phút
+const unsigned long noWaterDuration = 10 * 60 * 1000; // 2 phút
 
 //-----------------------------------
 // Đo và tính lưu lượng

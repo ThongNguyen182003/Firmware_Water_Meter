@@ -29,7 +29,8 @@ void initOTA(AsyncWebServer &server) {
             if (Update.hasError()) {
                 request->send(200, "text/plain", "Firmware Update Failed!");
             } else {
-                request->redirect("/"); // Về trang chủ (hoặc hiển thị thành công)
+                request->redirect("/"); // Return homepage and display completed
+                
             }
         },
         // Xử lý dữ liệu được upload
