@@ -4,6 +4,7 @@
 #include <vector>
 
 // Biến extern từ main
+extern float total_water_monthly;
 extern AsyncWebServer server;
 extern bool apEnabled;
 extern bool isWifiConnected;
@@ -142,40 +143,45 @@ void enableAccessPoint()
 
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
-            // Tạo chuỗi HTML
-            String htmlPage = "<html><body>";
+            String htmlPage = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
+            htmlPage += "<style>body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; } ";
+            htmlPage += "form { display: inline-block; background-color: #f9f9f9; padding: 20px; border: 1px solid #ccc; border-radius: 10px; }";
+            htmlPage += "input[type='text'], input[type='password'] { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; }";
+            htmlPage += "input[type='submit'] { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }";
+            htmlPage += "input[type='submit']:hover { background-color: #45a049; }";
+            htmlPage += "</style></head><body>";
             htmlPage += "<h2>Connect to WiFi</h2>";
-            
-            // Hiển thị tổng lượng nước
-            htmlPage += "<p><b>Total water usage this week:</b> ";
-            htmlPage += String(total_water_weekly);  // Chuyển float sang String
-            htmlPage += " liters</p>";
-            
-            // Form nhập WiFi
-            htmlPage += "<form action=\"/connect\" method=\"post\">"
-                        "SSID: <input type=\"text\" name=\"ssid\"><br>"
-                        "Password: <input type=\"password\" name=\"password\"><br>"
-                        "<input type=\"submit\" value=\"Connect\">"
-                        "</form>";
+            // Phần hiển thị tổng lượng nước tháng:
+            htmlPage += "<p><b>Total water usage this month:</b> " + String(total_water_monthly) + " liters</p>";
+            // Form kết nối WiFi:
+            htmlPage += "<form action=\"/connect\" method=\"post\">";
+            htmlPage += "SSID: <input type=\"text\" name=\"ssid\"><br>";
+            htmlPage += "Password: <input type=\"password\" name=\"password\"><br>";
+            htmlPage += "<input type=\"submit\" value=\"Connect\">";
+            htmlPage += "</form>";
             htmlPage += "</body></html>";
-        
-            // Gửi response
+
             request->send(200, "text/html", htmlPage); });
 
         server.on("/connect", HTTP_POST, [](AsyncWebServerRequest *request)
                   {
             String ssid     = "";
             String password = "";
-            if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
+            if (request->hasParam("ssid", true) && request->hasParam("password", true))
+            {
                 ssid     = request->getParam("ssid", true)->value();
                 password = request->getParam("password", true)->value();
             }
-            if (!ssid.isEmpty() && !password.isEmpty()) {
+
+            if (!ssid.isEmpty() && !password.isEmpty())
+            {
                 ssid_new     = ssid;
                 password_new = password;
                 disableAccessPoint();
                 currentState = KET_NOI_WIFI;
-            } else {
+            }
+            else
+            {
                 request->send(200, "text/plain", "Invalid credentials format.");
             } });
 
