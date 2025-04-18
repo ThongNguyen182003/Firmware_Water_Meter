@@ -1,60 +1,80 @@
 #include "ble_utils.h"
 #include "states.h"
+#include <FS.h>
+#include <SPIFFS.h>
+#include <string>
 
-// Biến, hàm dùng chung, ta "extern" từ main.cpp
-extern bool bleEnabled;
+// extern từ main.cpp
+extern bool   bleEnabled;
 extern String ssid_new;
 extern String password_new;
-extern State currentState;
+extern String id_new;
+extern State  currentState;
 
-// Callback BLE để nhận WiFi credentials
 class MyCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) {
-      String value = pCharacteristic->getValue().c_str();
-      Serial.println("Value received: " + value);
+    void onWrite(BLECharacteristic *pCharacteristic) override {
+        // Đọc raw payload
+        std::string raw = pCharacteristic->getValue();
+        Serial.printf("BLE RX raw (len=%u): ", raw.length());
+        Serial.println(raw.c_str());
 
-      if (value.startsWith("ssid:") && value.indexOf(",psw:") != -1) {
-          int ssidStart = value.indexOf("ssid:") + 5;
-          int pswStart  = value.indexOf(",psw:") + 5;
+        // Chuyển sang String và chuẩn hóa dấu phân cách (dấu phẩy -> dấu chấm phẩy)
+        String value = String(raw.c_str());
+        value.replace(',', ';');
+        Serial.println("[BLE] normalized: " + value);
 
-          if (ssidStart < pswStart - 5 && pswStart < (int)value.length()) {
-              String ssid     = value.substring(ssidStart, pswStart - 5);
-              String password = value.substring(pswStart);
+        // Parse khi có đủ 3 trường: ssid, psw, id
+        if (value.startsWith("ssid:") &&
+            value.indexOf(";psw:") != -1 &&
+            value.indexOf(";id:")  != -1) {
 
-              Serial.println("Received WiFi credentials:");
-              Serial.println("SSID: " + ssid);
-              Serial.println("Password: " + password);
+            int ssidStart = value.indexOf("ssid:") + 5;
+            int pswStart  = value.indexOf(";psw:")  + 5;
+            int idStart   = value.indexOf(";id:")   + 4;
+            int ssidEnd   = value.indexOf(";", ssidStart);
+            int pswEnd    = value.indexOf(";", pswStart);
 
-              ssid_new    = ssid;
-              password_new= password;
-              currentState= KET_NOI_WIFI; // chuyển qua kết nối WiFi
-          } else {
-              Serial.println("Invalid WiFi credentials format");
-          }
-      }
-  }
+            String ssid     = value.substring(ssidStart, ssidEnd);
+            String password = value.substring(pswStart, pswEnd);
+            String devId    = value.substring(idStart);
+
+            ssid_new     = ssid;
+            password_new = password;
+            id_new       = devId;
+
+            // Lưu ID vào SPIFFS
+            File f = SPIFFS.open("/device_id.txt", FILE_WRITE);
+            if (f) {
+                f.println(id_new);
+                f.close();
+                Serial.println("Saved device ID to /device_id.txt");
+            } else {
+                Serial.println("Failed to open /device_id.txt");
+            }
+
+            currentState = KET_NOI_WIFI;
+        } else {
+            Serial.println("Invalid BLE payload");
+        }
+    }
 };
 
 void initBLE() {
     if (!bleEnabled) {
+        SPIFFS.begin(true);
         BLEDevice::init("XIAO_ESP32S3");
-        BLEServer *pServer   = BLEDevice::createServer();
-        BLEService *pService = pServer->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-
-        BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+        auto *pServer  = BLEDevice::createServer();
+        auto *pService = pServer->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        auto *pChar    = pService->createCharacteristic(
             "beb5483e-36e1-4688-b7f5-ea07361b26a8",
             BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
         );
-        pCharacteristic->setCallbacks(new MyCallbacks());
+        pChar->setCallbacks(new MyCallbacks());
         pService->start();
-
-        BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-        pAdvertising->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-        pAdvertising->setScanResponse(true);
+        BLEDevice::getAdvertising()->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
         BLEDevice::startAdvertising();
-
         bleEnabled = true;
-        Serial.println("BLE enabled and advertising");
+        Serial.println("BLE enabled");
     }
 }
 
@@ -66,11 +86,10 @@ void stopBLE() {
     }
 }
 
-// Khi state == CHUA_CO_KET_NOI => chuyển qua BLE
 void handleStateCHUA_CO_KET_NOI() {
     static unsigned long lastAttemptTime = 0;
     if (millis() - lastAttemptTime > 500) {
-        Serial.println("State: No have connection => init BLE");
+        Serial.println("State: CHUA_CO_KET_NOI => initBLE");
         initBLE();
         currentState = KET_NOI_BLE;
         lastAttemptTime = millis();
