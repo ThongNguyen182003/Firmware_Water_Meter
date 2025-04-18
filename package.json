@@ -1,0 +1,28 @@
+{
+  "name": "xiao_esp32s3",
+  "version": "1.0.0",
+  "description": "**Firmware_Water_Meter** is a firmware project designed for ESP32-based water metering. It measures water flow using a flow sensor and sends the data via MQTT. The firmware supports multiple connectivity options (WiFi, BLE, and Access Point mode) and features Over-The-Air (OTA) update capabilities for easy remote  firmware upgrades.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThongNguyen182003/Firmware_Water_Meter.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ThongNguyen182003/Firmware_Water_Meter/issues"
+  },
+  "homepage": "https://github.com/ThongNguyen182003/Firmware_Water_Meter#readme",
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-fileupload": "^1.5.1"
+  }
+}

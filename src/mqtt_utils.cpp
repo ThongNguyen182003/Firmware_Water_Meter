@@ -13,7 +13,7 @@ extern const char*  mqtt_password;
 extern String       id_new;
 
 // URL firmware OTA
-static const char* OTA_URL = "http://10.28.128.17:3000/firmware.bin";
+static const char* OTA_URL = "http://192.168.115.101:3000/firmware-v0.bin";
 
 // Đăng ký subscribe cho các sub‑topic của /data/<id_new>/
 static void subscribeDeviceTopics() {
@@ -38,7 +38,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.printf("MQTT >> topic: %s, payload: %s\n",
                   receivedTopic.c_str(), messageValue.c_str());
 
-    String prefix = "/data/" + id_new + "/";
+    const String prefix = "/data/" + id_new + "/";
     if (receivedTopic.startsWith(prefix)) {
         String sub = receivedTopic.substring(prefix.length());
 
@@ -52,9 +52,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             }
         }
         else if (sub == "ota") {
-            Serial.println(">>> OTA trigger received, starting HTTP OTA update");
-            // Gọi đúng prototype với URL
-            performHttpOtaUpdate(OTA_URL);
+            // Chỉ thực thi OTA khi payload đúng "1"
+            if (messageValue == "1") {
+                Serial.println(">>> OTA trigger received with payload=1, starting HTTP OTA update");
+                performHttpOtaUpdate(OTA_URL);
+            } else {
+                Serial.println(">>> OTA payload != 1, skipping update");
+            }
         }
     }
 }
@@ -62,26 +66,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void connectToMqtt() {
     static unsigned long lastAttemptTime = 0;
 
-    // Đặt máy chủ MQTT
     client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(mqttCallback);
 
-    // Kiểm tra nếu đã kết nối
     if (client.connected()) {
-        Serial.println("MQTT connected.");
-        client.subscribe("command"); // Đăng ký topic
+        subscribeDeviceTopics();
         return;
     }
 
-    // Nếu chưa kết nối, kiểm tra thời gian thử lại
-    if (millis() - lastAttemptTime >= 2000) { // Mỗi 2 giây thử lại
-        Serial.println("Attempting to connect to MQTT...");
-        if (client.connect("ESP32Client", mqtt_username, mqtt_password)) {
-            Serial.println("MQTT connected.");
-            client.subscribe("command"); // Đăng ký topic sau khi kết nối thành công
-        } else {
-            Serial.print("Failed to connect to MQTT, state: ");
-            Serial.println(client.state()); // Ghi lại trạng thái lỗi nếu có
-        }
-        lastAttemptTime = millis(); // Cập nhật thời gian lần thử tiếp theo
+    if (millis() - lastAttemptTime < 2000) {
+        return;
+    }
+    lastAttemptTime = millis();
+
+    Serial.println("Attempting to connect to MQTT...");
+    if (client.connect("ESP32Client", mqtt_username, mqtt_password)) {
+        Serial.println("MQTT connected.");
+        subscribeDeviceTopics();
+    } else {
+        Serial.printf("Failed to connect to MQTT, rc=%d\n", client.state());
     }
 }
