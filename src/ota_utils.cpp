@@ -1,58 +1,57 @@
 #include "ota_utils.h"
-#include <Update.h>  
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Update.h>
+#include "mqtt_utils.h"
+/**
+ * @brief Thực thi OTA HTTP: tải firmware từ otaUrl và flash vào ESP.
+ * @param otaUrl Đường dẫn HTTP đến firmware.bin
+ */
+void performHttpOtaUpdate(const char* otaUrl) {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("OTA: WiFi chưa kết nối");
+        return;
+    }
 
-/*
-* OTA Update Function
-*/
-void initOTA(AsyncWebServer &server) {
-    server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", 
-            "<html>"
-            "<body>"
-            "<h2>OTA Update</h2>"
-            "<form method='POST' action='/update' enctype='multipart/form-data'>"
-            "  <input type='file' name='firmware' accept='.bin' required>"
-            "  <br><br>"
-            "  <input type='submit' value='Update Firmware'>"
-            "</form>"
-            "</body>"
-            "</html>"
-        );
-    });
+    Serial.printf("OTA: Tải từ %s\n", otaUrl);
+    HTTPClient http;
+    http.begin(otaUrl);
 
-    // Route POST to handle uploaded file 
-    server.on(
-        "/update", 
-        HTTP_POST,
-        // Update Completed 
-        [](AsyncWebServerRequest *request) {
-            if (Update.hasError()) {
-                request->send(200, "text/plain", "Firmware Update Failed!");
-            } else {
-                request->redirect("/"); // Return homepage and display completed
-                
-            }
-        },
-        // Xử lý dữ liệu được upload
-        [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            if (!index) {
-                Serial.printf("OTA Update Start: %s\n", filename.c_str());
-                // Bắt đầu quá trình Update
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-                    Update.printError(Serial);
-                }
-            }
-            // Ghi dữ liệu firmware
-            if (Update.write(data, len) != len) {
-                Update.printError(Serial);
-            }
-            if (final) {
-                if (Update.end(true)) {
-                    Serial.printf("OTA Update Success: %u bytes\n", index + len);
-                } else {
-                    Update.printError(Serial);
-                }
-            }
-        }
-    );
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("OTA: HTTP GET lỗi, code=%d\n", httpCode);
+        http.end();
+        return;
+    }
+
+    int contentLength = http.getSize();
+    if (contentLength <= 0) {
+        Serial.println("OTA: Content-Length không hợp lệ");
+        http.end();
+        return;
+    }
+
+    // Bắt đầu update với đúng kích thước
+    if (!Update.begin(contentLength)) {
+        Serial.println("OTA: Không đủ vùng nhớ");
+        http.end();
+        return;
+    }
+
+    // Ghi từng byte từ stream
+    WiFiClient *stream = http.getStreamPtr();
+    size_t written = Update.writeStream(*stream);
+    Serial.printf("OTA: Đã ghi %u/%u bytes\n", written, (unsigned)contentLength);
+
+    // Hoàn tất và kiểm tra
+    if (Update.end() && Update.isFinished()) {
+        Serial.println("OTA: Thành công, khởi động lại...");
+        ESP.restart();
+    } else {
+        Serial.printf("OTA: Lỗi #%u: %s\n",
+                      Update.getError(),
+                      Update.errorString());
+    }
+
+    http.end();
 }
