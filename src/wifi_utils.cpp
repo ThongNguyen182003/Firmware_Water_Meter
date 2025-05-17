@@ -10,40 +10,67 @@ extern bool apEnabled;
 extern bool isWifiConnected;
 extern String ssid_new, password_new;
 extern State currentState;
-
+extern String id_new;
 // MQTT extern
 extern PubSubClient client;
 
 // --------------------------------
-// Lưu / đọc / xóa WiFi credentials
+// Lưu WiFi credentials (atomic write)
 // --------------------------------
 void saveWiFiCredentials(const String &ssid, const String &password)
 {
-    File file = SPIFFS.open("/wifi.txt", FILE_WRITE);
-    if (!file)
+    // 1) Ghi ra file tạm
+    File tmp = SPIFFS.open("/wifi.tmp", FILE_WRITE);
+    if (!tmp)
     {
-        Serial.println("Failed to open file for writing WiFi credentials");
+        Serial.println("saveWiFiCredentials: Failed to open /wifi.tmp for writing");
         return;
     }
-    file.println(ssid);
-    file.println(password);
-    file.close();
-    Serial.println("WiFi credentials saved to SPIFFS.");
+    tmp.println(ssid);
+    tmp.println(password);
+    tmp.close();
+
+    // 2) Xoá file cũ và rename
+    if (SPIFFS.remove("/wifi.txt"))
+    {
+        if (!SPIFFS.rename("/wifi.tmp", "/wifi.txt"))
+        {
+            Serial.println("aveWiFiCredentials: Failed to rename /wifi.tmp → /wifi.txt");
+            // Nếu rename lỗi, có thể giữ lại /wifi.tmp để debug
+        }
+        else
+        {
+            Serial.println("WiFi credentials saved to SPIFFS.");
+        }
+    }
+    else
+    {
+        Serial.println("saveWiFiCredentials: Failed to remove old /wifi.txt");
+    }
 }
 
+// --------------------------------
+// Đọc WiFi credentials với debug info
+// --------------------------------
 bool loadWiFiCredentials(String &ssid, String &password)
 {
     File file = SPIFFS.open("/wifi.txt", FILE_READ);
     if (!file)
     {
-        Serial.println("Failed to open file for reading WiFi credentials");
+        Serial.println("loadWiFiCredentials: Failed to open /wifi.txt for reading");
         return false;
     }
+
     ssid = file.readStringUntil('\n');
     password = file.readStringUntil('\n');
     ssid.trim();
     password.trim();
     file.close();
+
+    Serial.printf("🔍 loadWiFiCredentials: SSID=\"%s\", Password=\"%s\"\n",
+                  ssid.c_str(), password.c_str());
+
+    // Chỉ trả về true khi cả hai đều không rỗng
     return !ssid.isEmpty() && !password.isEmpty();
 }
 
@@ -88,7 +115,7 @@ void handleStateKET_NOI_WIFI()
             currentState = KET_NOI_WIFI_THANH_CONG;
             connectingNew = false;
         }
-        else if (millis() - startAttemptTime > 10000)
+        else if (millis() - startAttemptTime > 15000) // 15s
         {
             Serial.println("Failed to connect with new credentials. Trying saved credentials...");
             String savedSSID, savedPassword;
@@ -171,10 +198,13 @@ void enableAccessPoint()
             {
                 ssid     = request->getParam("ssid", true)->value();
                 password = request->getParam("password", true)->value();
+                 Serial.printf("Đã kết nối Wifi mới: SSID = %s, Password: %s\n", ssid.c_str(), password.c_str());
+
             }
 
             if (!ssid.isEmpty() && !password.isEmpty())
             {
+                 Serial.printf("Đã kết nối Wifi mới: SSID = %s, Password: %s\n", ssid.c_str(), password.c_str());
                 ssid_new     = ssid;
                 password_new = password;
                 disableAccessPoint();
@@ -204,7 +234,7 @@ void disableAccessPoint()
 // --------------------------------
 void enableLAN()
 {
-    Serial.println("LAN Mode");
+    // Serial.println("LAN Mode");
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(200, "text/html",
                               "<html><body><h2>Connect to WiFi - LAN Mode</h2>"
@@ -221,6 +251,7 @@ void enableLAN()
         if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
             ssid     = request->getParam("ssid", true)->value();
             password = request->getParam("password", true)->value();
+             Serial.printf("Đã kết nối Wifi mới: SSID = %s, Password: %s\n", ssid.c_str(), password.c_str());
         }
         if (!ssid.isEmpty() && !password.isEmpty()) {
             ssid_new     = ssid;
@@ -258,7 +289,6 @@ void saveDataToSPIFFS(const String &data)
         lines.erase(lines.begin());
     }
     lines.push_back(data);
-    Serial.println("Saved to SPIFFS: " + data);
 
     file = SPIFFS.open("/data.log", FILE_WRITE);
     if (!file)
@@ -272,53 +302,44 @@ void saveDataToSPIFFS(const String &data)
     }
     file.close();
 }
-
 bool sendSavedDataToMQTT()
 {
     static File file = SPIFFS.open("/data.log", FILE_READ);
+
     if (!file)
     {
-        Serial.println("Failed to open file for reading");
+        Serial.println("[MQTT] Failed to open /data.log for reading");
         return false;
     }
+
     if (!file.available())
     {
-        Serial.println("No more data in flash to send.");
+        Serial.println("[MQTT] No more data to send, deleting log...");
         file.close();
         SPIFFS.remove("/data.log");
         return false;
     }
+
     String line = file.readStringUntil('\n');
-    if (line.length() > 0)
+    line.trim(); // bỏ ký tự xuống dòng nếu có
+
+    if (line.length() > 0 && client.connected())
     {
-        if (client.publish("datawater", line.c_str()))
+        String topic = "datawater/" + id_new;
+        Serial.println("[Send Saved Data] Sending to topic: " + topic);
+        Serial.println("[Send Saved Data] Payload: " + line);
+
+        if (client.publish(topic.c_str(), line.c_str()))
         {
-            Serial.println("Sent flash data: " + line);
+            Serial.println("[Send Saved Data] Sent flash data OK");
         }
         else
         {
-            Serial.println("Failed to send flash data: " + line);
+            Serial.println("[Send Saved Data] Failed to send flash data");
             file.close();
             return false;
         }
     }
-    return true;
-}
 
-void publishFlowRate(float flowRate)
-{
-    if (flowRate >= 1.5)
-    {
-        String flowMessage = String(flowRate);
-        Serial.println("Publishing flow rate: " + flowMessage);
-        if (!client.publish("datawater", flowMessage.c_str()))
-        {
-            Serial.println("Failed to send MQTT. Saving to SPIFFS.");
-            saveDataToSPIFFS(flowMessage);
-        }
-        else
-        {
-            Serial.println("Sent to topic Datawater: " + flowMessage);
-        }
-    }
+    return true;
 }

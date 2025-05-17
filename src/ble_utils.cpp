@@ -89,7 +89,6 @@ void stopBLE() {
 void handleStateCHUA_CO_KET_NOI() {
     static unsigned long lastAttemptTime = 0;
     if (millis() - lastAttemptTime > 500) {
-        Serial.println("State: CHUA_CO_KET_NOI => initBLE");
         initBLE();
         currentState = KET_NOI_BLE;
         lastAttemptTime = millis();

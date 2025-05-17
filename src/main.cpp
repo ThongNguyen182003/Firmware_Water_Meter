@@ -37,8 +37,8 @@ bool   isWifiConnected = false;
 bool   apEnabled       = false;
 String id_new;
 
-String ssid_new     = "thong";
-String password_new = "123457890";
+String ssid_new     = "";
+String password_new = "";
 
 State currentState = CHUA_CO_KET_NOI;
 
@@ -54,7 +54,7 @@ AsyncWebServer   server(80);
 #define FLOW_SENSOR_PIN GPIO_NUM_2
 volatile int           pulseCount    = 0;
 volatile unsigned long lastPulseTime = 0;
-static const float     calibrationFactor = 450.0;
+static const float     calibrationFactor = 450;
 
 bool   noWaterDetected      = false;
 unsigned long noWaterStartTime = 0;
@@ -62,6 +62,30 @@ const unsigned long noWaterDuration = 10UL * 60UL * 1000UL; // 10 phút
 
 volatile unsigned long meterReading = 0;
 float lastMeasuredFlowRate         = 0;
+
+
+// Define State Name
+
+const char* stateNames[] = {
+  "CHUA_CO_KET_NOI",
+  "KET_NOI_BLE",
+  "KET_NOI_WIFI",
+  "KET_NOI_WIFI_THANH_CONG",
+  "SEND_FLASH_DATA",
+  "GUI_DU_LIEU_MQTT",
+  "CHE_DO_BLE",
+  "CHE_DO_AP",
+  "CHE_DO_LAN"
+};
+
+// Get State Name
+const char* getStateName(State s) {
+  size_t count = sizeof(stateNames) / sizeof(stateNames[0]);
+  if ((int)s >= 0 && (size_t)s < count) {
+    return stateNames[s];
+  }
+  return "UNKNOWN_STATE";
+}
 
 //——————————————————
 // ISR đếm xung
@@ -82,7 +106,8 @@ float readFlowRate() {
   int pulses = pulseCount;
   pulseCount = 0;
   interrupts();
-  float flowRate = (pulses / calibrationFactor) * 60.0;
+   float flowRate = (pulses / calibrationFactor) * 60;
+  // float flowRate = (pulses/5.5);
   total_water_weekly += flowRate;
   meterReading += pulses;
 //   Serial.printf("[Read] flowRate=%.2f L/min, pulses=%d\n", flowRate, pulses);
@@ -161,7 +186,6 @@ void printWakeUpReason() {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
   printWakeUpReason();
   configTime(0,0,"pool.ntp.org","time.nist.gov");
   if (!SPIFFS.begin(true)) Serial.println("[SPIFFS] mount failed");
@@ -183,66 +207,130 @@ void setup() {
   client.setCallback(mqttCallback);
   Serial.println("[Setup] BLE mode");
   initBLE();
-  clearWiFiCredentials();
+  // clearWiFiCredentials();
   currentState = KET_NOI_WIFI;
 }
 
 void loop() {
   unsigned long now = millis();
-    
+
   // 1s đọc flow
   if (now - lastReadTime >= 1000) {
     lastReadTime = now;
     lastMeasuredFlowRate = readFlowRate();
     handleNoWaterSleepMode(lastMeasuredFlowRate);
   }
-  // 10m update monthly
-  if (now - lastMeterTime >= 600000) { lastMeterTime = now; updateMonthlyTotal(); }
-  // 15s publish data
-  if (now - lastPublishTime >= 15000) {
+
+  // 10m update monthly total (giữ nguyên lịch trình cũ)
+  if (now - lastMeterTime >= 10000) {
+    lastMeterTime = now;
+    updateMonthlyTotal();
+  }
+
+  // 15s publish or save offline when flowRate >= 1 L/min
+  if (now - lastPublishTime >= DATA_PUBLISH_INTERVAL) {
     lastPublishTime = now;
-    if (client.connected()) {
-      String topic = "data/" + id_new;
-      Serial.println(topic);
-      String json = String("{\"flowRate\":") + String(lastMeasuredFlowRate,2)
-                   + ",\"volume\":" + String(lastIntervalVolume,2)
-                   + ",\"total_monthly\":" + String(total_water_monthly,2)
+
+    // Chỉ xử lý khi có nước chảy (flowRate >= 1 L/min)
+    if (lastMeasuredFlowRate >= 1.0) {
+      String topic = "datawater/" + id_new;
+      String json = String("{\"flowRate\":")      + String(lastMeasuredFlowRate, 2)
+                   + ",\"volume\":"              + String(lastIntervalVolume,   2)
+                   + ",\"total_monthly\":"       + String(total_water_monthly,  2)
                    + "}";
-      client.publish(topic.c_str(), json.c_str());
-      Serial.println("[Pub] ALL JSON: " + json);
-    } else {
-        Serial.println("Can't send");
+
+      if (client.connected()) {
+        client.publish(topic.c_str(), json.c_str());
+        Serial.println("[Pubblish] JSON: " + json);
+      } else {
+        saveDataToSPIFFS(json);
+        Serial.println("[Offline] Saved JSON: " + json);
+      }
     }
   }
-  if (WiFi.status() == WL_CONNECTED) checkMonthlyReset();
 
-  // State machine every 100ms, in ra khi chuyển state
+  // Nếu Wi-Fi đang kết nối, kiểm tra xem có cần reset tổng tháng
+  if (WiFi.status() == WL_CONNECTED) {
+    checkMonthlyReset();
+  }
+
+  // State machine every 100ms
   if (now - lastCheckTime >= 100) {
     lastCheckTime = now;
+
+    // In log khi chuyển state
     if (currentState != lastState) {
-      Serial.printf("[State] %d -> %d\n", lastState, currentState);
-      lastState = currentState;
-    }
+          Serial.printf("[State] %s -> %s\n",
+                        getStateName(lastState),
+                        getStateName(currentState));
+          lastState = currentState;
+        }
     switch (currentState) {
-      case CHUA_CO_KET_NOI: handleStateCHUA_CO_KET_NOI(); break;
-      case KET_NOI_BLE:   break;  // đã init BLE
-      case KET_NOI_WIFI:  handleStateKET_NOI_WIFI(); break;
-      case KET_NOI_WIFI_THANH_CONG:
-        if (!isWifiConnected) { isWifiConnected=true; Serial.println("[WiFi] connected"); }
-        if (!client.connected()) connectToMqtt();
-        if (WiFi.status()!=WL_CONNECTED) { currentState=CHUA_CO_KET_NOI; isWifiConnected=false; }
-        else if (SPIFFS.exists("/data.log")) currentState=SEND_FLASH_DATA;
-        else currentState=GUI_DU_LIEU_MQTT;
+      case CHUA_CO_KET_NOI:
+        handleStateCHUA_CO_KET_NOI();
         break;
+
+      case KET_NOI_BLE:
+        // Đã init BLE ở setup
+        break;
+
+      case KET_NOI_WIFI:
+        handleStateKET_NOI_WIFI();
+        break;
+
+      case KET_NOI_WIFI_THANH_CONG:
+        if (!isWifiConnected) {
+          isWifiConnected = true;
+          Serial.println("[WiFi] connected");
+        }
+        if (!client.connected()) {
+          connectToMqtt();
+        }
+        if (WiFi.status() != WL_CONNECTED) {
+          currentState = CHUA_CO_KET_NOI;
+          isWifiConnected = false;
+        }
+        else if (SPIFFS.exists("/data.log")) {
+          currentState = SEND_FLASH_DATA;
+        }
+        else {
+          currentState = GUI_DU_LIEU_MQTT;
+        }
+        break;
+
       case SEND_FLASH_DATA: {
-        static unsigned long t=0;
-        if (now - t >= 1000) { t=now; if (!sendSavedDataToMQTT()) currentState=GUI_DU_LIEU_MQTT; }
+        static unsigned long t = 0;
+        if (now - t >= 1000) {
+          t = now;
+          if (!sendSavedDataToMQTT()) {
+            currentState = GUI_DU_LIEU_MQTT;
+          }
+        }
       } break;
-      case GUI_DU_LIEU_MQTT: if (isWifiConnected) client.loop(); break;
-      case CHE_DO_BLE: initBLE(); break;
-      case CHE_DO_AP:   stopBLE(); enableAccessPoint(); break;
-      case CHE_DO_LAN:  stopBLE(); enableLAN(); break;
-      default: currentState=CHUA_CO_KET_NOI;
+
+      case GUI_DU_LIEU_MQTT:
+        if (isWifiConnected) {
+          client.loop();
+        }
+        break;
+
+      case CHE_DO_BLE:
+        initBLE();
+        break;
+
+      case CHE_DO_AP:
+        stopBLE();
+        enableAccessPoint();
+        break;
+
+      case CHE_DO_LAN:
+        stopBLE();
+        enableLAN();
+        break;
+
+      default:
+        currentState = CHUA_CO_KET_NOI;
+        break;
     }
   }
 }
