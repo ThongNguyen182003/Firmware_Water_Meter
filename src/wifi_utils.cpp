@@ -23,7 +23,7 @@ void saveWiFiCredentials(const String &ssid, const String &password)
     File tmp = SPIFFS.open("/wifi.tmp", FILE_WRITE);
     if (!tmp)
     {
-        Serial.println("saveWiFiCredentials: Failed to open /wifi.tmp for writing");
+        Serial.println("[ SaveWiFiCredentials ]: Failed to open /wifi.tmp for writing");
         return;
     }
     tmp.println(ssid);
@@ -35,17 +35,17 @@ void saveWiFiCredentials(const String &ssid, const String &password)
     {
         if (!SPIFFS.rename("/wifi.tmp", "/wifi.txt"))
         {
-            Serial.println("aveWiFiCredentials: Failed to rename /wifi.tmp → /wifi.txt");
+            Serial.println("[ SaveWiFiCredentials ] : Failed to rename /wifi.tmp → /wifi.txt");
             // Nếu rename lỗi, có thể giữ lại /wifi.tmp để debug
         }
         else
         {
-            Serial.println("WiFi credentials saved to SPIFFS.");
+            Serial.println(" [ SaveWiFiCredentials ] WiFi credentials saved to SPIFFS.");
         }
     }
     else
     {
-        Serial.println("saveWiFiCredentials: Failed to remove old /wifi.txt");
+        Serial.println("[ SaveWiFiCredentials ]: Failed to remove old /wifi.txt");
     }
 }
 
@@ -57,7 +57,7 @@ bool loadWiFiCredentials(String &ssid, String &password)
     File file = SPIFFS.open("/wifi.txt", FILE_READ);
     if (!file)
     {
-        Serial.println("loadWiFiCredentials: Failed to open /wifi.txt for reading");
+        Serial.println("[ LoadWiFiCredentials ]: Failed to open /wifi.txt for reading");
         return false;
     }
 
@@ -67,7 +67,7 @@ bool loadWiFiCredentials(String &ssid, String &password)
     password.trim();
     file.close();
 
-    Serial.printf("🔍 loadWiFiCredentials: SSID=\"%s\", Password=\"%s\"\n",
+    Serial.printf("[ LoadWiFiCredentials ] : SSID=\"%s\", Password=\"%s\"\n",
                   ssid.c_str(), password.c_str());
 
     // Chỉ trả về true khi cả hai đều không rỗng
