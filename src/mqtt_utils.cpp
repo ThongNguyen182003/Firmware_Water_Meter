@@ -83,6 +83,7 @@ void connectToMqtt() {
     if (client.connect("ESP32Client", mqtt_username, mqtt_password)) {
         Serial.println("MQTT connected.");
         subscribeDeviceTopics();
+        currentState =  KET_NOI_WIFI_THANH_CONG;
     } else {
         Serial.printf("Failed to connect to MQTT, rc=%d\n", client.state());
     }

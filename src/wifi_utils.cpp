@@ -69,7 +69,6 @@ bool loadWiFiCredentials(String &ssid, String &password)
 
     Serial.printf("[ LoadWiFiCredentials ] : SSID=\"%s\", Password=\"%s\"\n",
                   ssid.c_str(), password.c_str());
-
     // Chỉ trả về true khi cả hai đều không rỗng
     return !ssid.isEmpty() && !password.isEmpty();
 }
@@ -97,8 +96,10 @@ void handleStateKET_NOI_WIFI()
 
     if (!connectingNew && !tryingSaved)
     {
-        Serial.println("State: Connecting to WiFi with new credentials...");
+        Serial.println("[WiFi] Connecting with BLE-provided credentials...");
         WiFi.disconnect(true);
+        delay(100);
+        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8)); // Đặt lại DNS
         WiFi.begin(ssid_new.c_str(), password_new.c_str());
         startAttemptTime = millis();
         connectingNew = true;
@@ -108,22 +109,28 @@ void handleStateKET_NOI_WIFI()
     {
         if (WiFi.status() == WL_CONNECTED)
         {
-            Serial.println("\nConnected to WiFi successfully with new credentials.");
-            Serial.print("IP Address: ");
-            Serial.println(WiFi.localIP());
+            Serial.println("[WiFi] Connected with new credentials.");
+            Serial.print("Local IP: "); Serial.println(WiFi.localIP());
+            Serial.print("DNS IP: "); Serial.println(WiFi.dnsIP());
+
             saveWiFiCredentials(ssid_new, password_new);
             currentState = KET_NOI_WIFI_THANH_CONG;
             connectingNew = false;
         }
-        else if (millis() - startAttemptTime > 15000) // 15s
+        else if (millis() - startAttemptTime > 15000)
         {
-            Serial.println("Failed to connect with new credentials. Trying saved credentials...");
+            Serial.println("[WiFi] New credentials failed. Trying saved...");
             String savedSSID, savedPassword;
             if (loadWiFiCredentials(savedSSID, savedPassword))
             {
                 ssid_new = savedSSID;
                 password_new = savedPassword;
+                Serial.printf("[WiFi] Trying saved SSID=\"%s\", Password=\"%s\"\n",
+                              ssid_new.c_str(), password_new.c_str());
+
                 WiFi.disconnect(true);
+                delay(100);
+                WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8)); 
                 WiFi.begin(ssid_new.c_str(), password_new.c_str());
                 startAttemptTime = millis();
                 connectingNew = false;
@@ -131,7 +138,7 @@ void handleStateKET_NOI_WIFI()
             }
             else
             {
-                Serial.println("No saved WiFi credentials found. Returning to BLE mode.");
+                Serial.println("[WiFi] No saved credentials. Switching to BLE mode.");
                 currentState = CHUA_CO_KET_NOI;
                 connectingNew = false;
             }
@@ -141,20 +148,22 @@ void handleStateKET_NOI_WIFI()
     {
         if (WiFi.status() == WL_CONNECTED)
         {
-            Serial.println("\nConnected to WiFi using saved credentials.");
-            Serial.print("IP Address: ");
-            Serial.println(WiFi.localIP());
+            Serial.println("[WiFi] Connected with saved credentials.");
+            Serial.print("Local IP: "); Serial.println(WiFi.localIP());
+            Serial.print("DNS IP: "); Serial.println(WiFi.dnsIP());
+
             currentState = KET_NOI_WIFI_THANH_CONG;
             tryingSaved = false;
         }
         else if (millis() - startAttemptTime > 10000)
         {
-            Serial.println("\nFailed to connect to WiFi with saved credentials. Returning to BLE mode.");
+            Serial.println("[WiFi] Failed with saved credentials. Switching to BLE mode.");
             currentState = CHUA_CO_KET_NOI;
             tryingSaved = false;
         }
     }
 }
+
 
 // --------------------------------
 // Bật/Tắt Access Point
@@ -269,77 +278,116 @@ void enableLAN()
 // --------------------------------
 void saveDataToSPIFFS(const String &data)
 {
-    File file = SPIFFS.open("/data.log", FILE_READ);
     std::vector<String> lines;
-    if (file)
+
+    // Đọc nếu file tồn tại
+    if (SPIFFS.exists("/data.log"))
     {
-        while (file.available())
+        File file = SPIFFS.open("/data.log", FILE_READ);
+        if (file)
         {
-            lines.push_back(file.readStringUntil('\n'));
+            while (file.available())
+            {
+                String line = file.readStringUntil('\n');
+                line.trim();
+                if (!line.isEmpty())
+                    lines.push_back(line);
+            }
+            file.close();
         }
-        file.close();
-    }
-    else
-    {
-        Serial.println("Failed to open file for reading first time.");
     }
 
+    // Giới hạn dòng
     if (lines.size() >= 20)
     {
-        lines.erase(lines.begin());
+        lines.erase(lines.begin()); // xóa dòng đầu tiên
     }
+
+    // Thêm dòng mới
     lines.push_back(data);
 
-    file = SPIFFS.open("/data.log", FILE_WRITE);
+    // Ghi lại toàn bộ file
+    File file = SPIFFS.open("/data.log", FILE_WRITE);
     if (!file)
     {
-        Serial.println("Failed to open file for writing");
+        Serial.println("[SPIFFS] Failed to open /data.log for writing");
         return;
     }
-    for (auto &l : lines)
+    for (const auto &l : lines)
     {
         file.println(l);
     }
     file.close();
+    Serial.println("[SPIFFS] Data saved to /data.log");
 }
+
 bool sendSavedDataToMQTT()
 {
-    static File file = SPIFFS.open("/data.log", FILE_READ);
+    if (!SPIFFS.exists("/data.log"))
+    {
+        Serial.println("[MQTT] No /data.log to send");
+        return false;
+    }
 
+    File file = SPIFFS.open("/data.log", FILE_READ);
     if (!file)
     {
         Serial.println("[MQTT] Failed to open /data.log for reading");
         return false;
     }
 
-    if (!file.available())
+    std::vector<String> lines;
+    while (file.available())
     {
-        Serial.println("[MQTT] No more data to send, deleting log...");
-        file.close();
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (!line.isEmpty())
+            lines.push_back(line);
+    }
+    file.close();
+
+    if (lines.empty())
+    {
         SPIFFS.remove("/data.log");
+        Serial.println("[MQTT] /data.log empty -> deleted");
         return false;
     }
 
-    String line = file.readStringUntil('\n');
-    line.trim(); // bỏ ký tự xuống dòng nếu có
+    String lineToSend = lines.front();
+    lines.erase(lines.begin());
 
-    if (line.length() > 0 && client.connected())
+    if (client.connected())
     {
         String topic = "datawater/" + id_new;
-        Serial.println("[Send Saved Data] Sending to topic: " + topic);
-        Serial.println("[Send Saved Data] Payload: " + line);
 
-        if (client.publish(topic.c_str(), line.c_str()))
-        {
-            Serial.println("[Send Saved Data] Sent flash data OK");
-        }
-        else
-        {
-            Serial.println("[Send Saved Data] Failed to send flash data");
-            file.close();
-            return false;
-        }
+        client.publish(topic.c_str(), lineToSend.c_str());
+        // if (client.publish(topic.c_str(), lineToSend.c_str())) {
+        //     Serial.println("[MQTT] Sent saved data: " + lineToSend);
+        // } else {
+        //     Serial.println("[MQTT] Failed to send saved data, will retry");
+        //     return true;  // giữ lại file, thử lại sau
+        // }
+    }
+    else
+    {
+        Serial.println("[MQTT] Client not connected, will retry");
+        return false;
     }
 
-    return true;
+    if (lines.empty())
+    {
+        SPIFFS.remove("/data.log");
+        Serial.println("[MQTT] All saved data sent. File deleted.");
+    }
+    else
+    {
+        file = SPIFFS.open("/data.log", FILE_WRITE);
+        for (const auto &l : lines)
+        {
+            file.println(l);
+        }
+        file.close();
+    }
+
+    return !lines.empty(); // true nếu còn dữ liệu để gửi tiếp
 }
