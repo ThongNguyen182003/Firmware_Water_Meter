@@ -69,7 +69,7 @@ bool loadWiFiCredentials(String &ssid, String &password)
 
     Serial.printf("[ LoadWiFiCredentials ] : SSID=\"%s\", Password=\"%s\"\n",
                   ssid.c_str(), password.c_str());
-    // Chỉ trả về true khi cả hai đều không rỗng
+
     return !ssid.isEmpty() && !password.isEmpty();
 }
 
@@ -88,82 +88,58 @@ void clearWiFiCredentials()
 // --------------------------------
 // Xử lý state KET_NOI_WIFI
 // --------------------------------
-void handleStateKET_NOI_WIFI()
-{
+void handleStateKET_NOI_WIFI() {
     static unsigned long startAttemptTime = 0;
     static bool connectingNew = false;
     static bool tryingSaved = false;
 
-    if (!connectingNew && !tryingSaved)
-    {
-        Serial.println("[WiFi] Connecting with BLE-provided credentials...");
+    if (!connectingNew && !tryingSaved) {
+        Serial.println("State: Connecting to WiFi with new credentials...");
         WiFi.disconnect(true);
-        delay(100);
-        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8)); // Đặt lại DNS
         WiFi.begin(ssid_new.c_str(), password_new.c_str());
         startAttemptTime = millis();
         connectingNew = true;
     }
 
-    if (connectingNew)
-    {
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            Serial.println("[WiFi] Connected with new credentials.");
-            Serial.print("Local IP: "); Serial.println(WiFi.localIP());
-            Serial.print("DNS IP: "); Serial.println(WiFi.dnsIP());
-
-            saveWiFiCredentials(ssid_new, password_new);
+    if (connectingNew) {
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("\nConnected to WiFi successfully with new credentials.");
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
+            saveWiFiCredentials(ssid_new, password_new); // Lưu thông tin WiFi
             currentState = KET_NOI_WIFI_THANH_CONG;
             connectingNew = false;
-        }
-        else if (millis() - startAttemptTime > 15000)
-        {
-            Serial.println("[WiFi] New credentials failed. Trying saved...");
+        } else if (millis() - startAttemptTime > 10000) { // Timeout sau 10 giây
+            Serial.println("Failed to connect with new credentials. Trying saved credentials...");
             String savedSSID, savedPassword;
-            if (loadWiFiCredentials(savedSSID, savedPassword))
-            {
+            if (loadWiFiCredentials(savedSSID, savedPassword)) {
                 ssid_new = savedSSID;
                 password_new = savedPassword;
-                Serial.printf("[WiFi] Trying saved SSID=\"%s\", Password=\"%s\"\n",
-                              ssid_new.c_str(), password_new.c_str());
-
                 WiFi.disconnect(true);
-                delay(100);
-                WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8)); 
                 WiFi.begin(ssid_new.c_str(), password_new.c_str());
                 startAttemptTime = millis();
                 connectingNew = false;
                 tryingSaved = true;
-            }
-            else
-            {
-                Serial.println("[WiFi] No saved credentials. Switching to BLE mode.");
+            } else {
+                Serial.println("No saved WiFi credentials found. Returning to BLE mode.");
                 currentState = CHUA_CO_KET_NOI;
                 connectingNew = false;
             }
         }
-    }
-    else if (tryingSaved)
-    {
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            Serial.println("[WiFi] Connected with saved credentials.");
-            Serial.print("Local IP: "); Serial.println(WiFi.localIP());
-            Serial.print("DNS IP: "); Serial.println(WiFi.dnsIP());
-
+    } else if (tryingSaved) {
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("\nConnected to WiFi using saved credentials.");
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
             currentState = KET_NOI_WIFI_THANH_CONG;
             tryingSaved = false;
-        }
-        else if (millis() - startAttemptTime > 10000)
-        {
-            Serial.println("[WiFi] Failed with saved credentials. Switching to BLE mode.");
+        } else if (millis() - startAttemptTime > 10000) { // Timeout sau 10 giây
+            Serial.println("\nFailed to connect to WiFi with saved credentials. Returning to BLE mode.");
             currentState = CHUA_CO_KET_NOI;
             tryingSaved = false;
         }
     }
 }
-
 
 // --------------------------------
 // Bật/Tắt Access Point
@@ -358,15 +334,17 @@ bool sendSavedDataToMQTT()
 
     if (client.connected())
     {
+        id_new.trim();
         String topic = "datawater/" + id_new;
-
-        client.publish(topic.c_str(), lineToSend.c_str());
-        // if (client.publish(topic.c_str(), lineToSend.c_str())) {
-        //     Serial.println("[MQTT] Sent saved data: " + lineToSend);
-        // } else {
-        //     Serial.println("[MQTT] Failed to send saved data, will retry");
-        //     return true;  // giữ lại file, thử lại sau
-        // }
+        
+        // client.publish("datawater", "test");
+        // Serial.println("Test Flash Public");
+        if (client.publish(topic.c_str(), lineToSend.c_str())) {
+            Serial.println("[MQTT] Sent saved data: " + lineToSend);
+        } else {
+            Serial.println("[MQTT] Failed to send saved data, will retry");
+            return true;  // giữ lại file, thử lại sau
+        }
     }
     else
     {

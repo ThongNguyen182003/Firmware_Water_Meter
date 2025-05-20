@@ -55,7 +55,7 @@ AsyncWebServer server(80);
 volatile int pulseCount = 0;
 volatile unsigned long lastPulseTime = 0;
 static const float calibrationFactor = 450;
-
+String topic_test = "";
 bool noWaterDetected = false;
 unsigned long noWaterStartTime = 0;
 const unsigned long noWaterDuration = 10UL * 60UL * 1000UL; // 10 phút
@@ -264,14 +264,16 @@ void loop()
     // Chỉ xử lý khi có nước chảy (flowRate >= 1 L/min)
     if (lastMeasuredFlowRate >= 0)
     {
+      id_new.trim();
       String topic = "datawater/" + id_new;
-      String json = String("{\"flowRate\":") + String(lastMeasuredFlowRate, 2) + ",\"volume\":" + String(lastIntervalVolume, 2) + ",\"total_monthly\":" + String(total_water_monthly, 2) + "}";
 
+      String json = String("{\"flowRate\":") + String(lastMeasuredFlowRate, 2) + ",\"volume\":" + String(lastIntervalVolume, 2) + ",\"total_monthly\":" + String(total_water_monthly, 2) + "}";
+      // Serial.println("Topic public " + topic);
+      // Serial.println("Json public " + json);
+      // Serial.println("Public wwith BLE wwifi");
       if (client.connected())
       {
         client.publish(topic.c_str(), json.c_str());
-        Serial.printf("[MQTT] Payload length = %d\n", json.length());
-        Serial.printf("[MQTT] Payload TOpic length = %d\n", topic.length());
         Serial.println("[Pubblish] JSON: " + json);
       }
       else
@@ -364,18 +366,18 @@ void loop()
       break;
 
     case SEND_FLASH_DATA:
-    {
-      static unsigned long t = 0;
-      if (now - t >= 1000)
-      {
-        t = now;
+
+      static unsigned long lastFlashSendTime = 0;
+      if (millis() - lastFlashSendTime > 1000)
+      { // Gửi dữ liệu từ SPIFFS mỗi 500ms
+        lastFlashSendTime = millis();
         if (!sendSavedDataToMQTT())
         {
           currentState = GUI_DU_LIEU_MQTT;
         }
       }
-    }
-    break;
+      break;
+
     case GUI_DU_LIEU_MQTT:
       if (WiFi.status() != WL_CONNECTED)
       {
